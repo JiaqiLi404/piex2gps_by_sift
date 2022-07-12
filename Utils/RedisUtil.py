@@ -1,5 +1,5 @@
 import redis
-import Config
+from datas import Config
 
 redis_conn = redis.Redis(host=Config.REDIS_HOST, port=Config.REDIS_PORT, password=Config.REDIS_PSWD, db=Config.REDIS_DB)
 

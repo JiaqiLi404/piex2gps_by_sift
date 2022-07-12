@@ -4,7 +4,7 @@
 import exifread
 import os
 import csv
-import Config
+from datas import Config
 
 
 class CSVReader:
@@ -23,7 +23,8 @@ class CSVReader:
             if f.endswith('.csv'):
                 file = f
         if file is None:
-            raise RuntimeError("!!!!!Image doesn't have GPS attributes!!!!!")
+            raise RuntimeError("!!!!!Image doesn't have GPS attributes!!!!!", path, os.path.exists(path),
+                               os.listdir(path))
         # 读取csv文件
         with open(os.path.join(path, file)) as f:
             csv_f = csv.reader(f)
@@ -52,7 +53,7 @@ class CSVReader:
                 lat = float(row[lat_column]) / zoom
                 print("-----csv: loaded image ", file_number, " gps from csv:", lon, ',', lat)
         if lon is None or lat is None:
-            print("!!!!!Image doesn't have GPS attributes!!!!!")
+            print("!!!!!Image doesn't have GPS attributes!!!!!",str(file_number),self.GPSCsv)
             raise RuntimeError("!!!!!Image doesn't have GPS attributes!!!!!")
         return [lon, lat]
 

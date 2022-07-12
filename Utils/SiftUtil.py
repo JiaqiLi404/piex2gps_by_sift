@@ -68,15 +68,19 @@ class SiftImageOperator:
 
     @classmethod
     def gen_from_params(cls, imgLeft, imgRight, leftGPSLon, leftGPSLat, rightGPSLon, rightGPSLat, coef_w_0, coef_w_1,
-                        coef_h_0, coef_h_1, piex_w, piex_h, piex_k, piex_cosa):
+                        coef_h_0, coef_h_1, piex_w, piex_h, piex_k, piex_cosa, piex_sina, right_img_sina,
+                        right_img_cosa, right_image_k):
         operator = SiftImageOperator(imgLeft, imgRight, [leftGPSLon, leftGPSLat], [rightGPSLon, rightGPSLat], False)
         operator.piex_cosa = piex_cosa
-        operator.piex_sina = (1 - piex_cosa ** 2) ** 0.5
+        operator.piex_sina = piex_sina
         operator.coef_w = np.array([coef_w_0, coef_w_1])
         operator.coef_h = np.array([coef_h_0, coef_h_1])
         operator.piex_h = piex_h
         operator.piex_w = piex_w
         operator.piex_k = piex_k
+        operator.right_img_sina = right_img_sina
+        operator.right_img_cosa = right_img_cosa
+        operator.right_img_k = right_image_k
         return operator
 
     @classmethod
@@ -85,7 +89,8 @@ class SiftImageOperator:
                                    float(dict[b"right_lon"]), float(dict[b"right_lat"]), float(dict[b"coef_w_0"]),
                                    float(dict[b"coef_w_1"]), float(dict[b"coef_h_0"]), float(dict[b"coef_h_1"]),
                                    float(dict[b"piex_w"]), float(dict[b"piex_h"]), float(dict[b"piex_k"]),
-                                   float(dict[b"piex_cosa"]))
+                                   float(dict[b"piex_cosa"]), float(dict[b"piex_sina"]), float(dict[b"right_img_sina"]),
+                                   float(dict[b"right_img_cosa"]), float(dict[b"right_img_k"]))
 
     def to_dict(self):
         """
@@ -94,8 +99,10 @@ class SiftImageOperator:
         """
         return {"coef_w_0": float(self.coef_w[0]), "coef_w_1": float(self.coef_w[1]), "coef_h_0": float(self.coef_h[0]),
                 "coef_h_1": float(self.coef_h[1]), "piex_w": self.piex_w, "piex_h": self.piex_h, "piex_k": self.piex_k,
-                "piex_cosa": self.piex_cosa, "left_lon": self.leftGPS[0], "left_lat": self.leftGPS[1],
-                "right_lon": self.rightGPS[0], "right_lat": self.rightGPS[1]}
+                "piex_cosa": self.piex_cosa, "piex_sina": self.piex_sina, "left_lon": self.leftGPS[0],
+                "left_lat": self.leftGPS[1], "right_lon": self.rightGPS[0], "right_lat": self.rightGPS[1],
+                "right_img_sina": self.right_img_sina, "right_img_cosa": self.right_img_cosa,
+                "right_img_k": self.right_img_k}
 
     def _siftCompute(self, grayImg):
         img_copy = grayImg.copy()
@@ -403,7 +410,7 @@ class SiftImageOperator:
 
     # 进行坐标转换
     def getGPS(self, w, h, img_sig='l'):
-        if img_sig == 'r':
+        if img_sig == b'r':
             [w, h] = self.__rotate_vac_to_angle([w, h], self.right_img_sina, self.right_img_cosa,
                                                 self.right_img_k)
             w = w - self.piex_w

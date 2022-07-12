@@ -1,8 +1,7 @@
-from flask import *
 from flask import Flask
-from controller.GPSAnalysisController import gpsAnalysisApi
-import Utils.RedisUtil as redis
 
+from datas import Config
+from controller.GPSAnalysisController import gpsAnalysisApi
 
 app = Flask(__name__)  # 初始化app
 
@@ -14,8 +13,8 @@ app.config['JSON_AS_ASCII'] = False
 app.register_blueprint(gpsAnalysisApi, url_prefix='/gps')
 
 if __name__ == '__main__':
-    redis.clearAll()
-    app.run("127.0.0.1", 5000)  # 运行app
+    #redis.clearAll()
+    app.run(Config.WEB_RUNTIME_IP, Config.WEB_RUNTIME_PORT)  # 运行app
 
 
 

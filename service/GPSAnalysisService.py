@@ -1,18 +1,21 @@
-# @Time : 2022/5/21 21:04 
+# @Time : 2022/5/21 21:04
 # @Author : Li Jiaqi
 # @Description : 图像GPS映射参数的获得
 import csv
 import time
 
-from Utils.SiftUtil import SiftImageOperator, getGPS
+import cv2
+
+from Utils.SiftUtil import SiftImageOperator
 from PIL import Image
-import Config
+from datas import Config
 import os
 import multiprocessing as mp
 import Utils.GPSUtil as gpsUtil
 import Utils.RedisUtil as redis
 import numpy as np
 import matplotlib.pyplot as plt
+import Utils.UniqueTreeSetUtil as treeUtil
 
 pool = None
 
@@ -41,21 +44,42 @@ def startAnalyzeImages():
             imageNumNameMap[__getImageNumFromName(image)] = os.path.join(Config.DATA_PATH, image)
     # 按照数字大小排序图片文件，而不是字典序，随后生成图片对
     imgs = sorted(imageNumNameMap.keys())
-    imagePair = [imageNumNameMap[imgs[0]]]
-    for key in imgs[1:]:
-        imagePair.append(imageNumNameMap[key])
+    imagePair = []
+    for key in imgs:
+        if len(imagePair) == 0:
+            imagePair.append(key)
+        else:
+            imagePair.append(key)
+            imagePairs.append(imagePair.copy())
+            imagePair = []
+    if len(imagePair) == 1:
+        imagePair.append(imgs[-2])
         imagePairs.append(imagePair.copy())
-        imagePair = [imageNumNameMap[key]]
+    # imagePair = [imageNumNameMap[imgs[0]]]
+    # for key in imgs[1:]:
+    #     imagePair.append(imageNumNameMap[key])
+    #     imagePairs.append(imagePair.copy())
+    #     imagePair = [imageNumNameMap[key]]
 
     # 多进程处理图片
     pool = mp.Pool(Config.PROCESS_NUM)
     csvReader = gpsUtil.CSVReader()
     csvReader.readCSV(Config.DATA_PATH)
-    for pair in imagePairs:
-        pool.apply_async(__analyzeImagePair, (pair[0], pair[1], csvReader))
-    pool.close()
 
+    for i, pair in enumerate(imagePairs):
+        if i == 0:
+            pool.apply_async(__analyzeImagePair,
+                             (imageNumNameMap, pair[0], pair[1], csvReader, 0,))
+        elif i == len(imagePairs) - 1:
+            pool.apply_async(__analyzeImagePair,
+                             (imageNumNameMap, pair[0], pair[1], csvReader, -1,))
+        else:
+            pool.apply_async(__analyzeImagePair, (
+                imageNumNameMap, pair[0], pair[1], csvReader, i,))
+
+    pool.close()
     # pool.join()
+    print("***** calculating ", len(imagePairs), " image pairs")
 
 
 def endAnalyzeImages():
@@ -77,70 +101,68 @@ def getGPSfromCSV(fileName):
     :param fileName:
     :return:
     """
+    global pool
+    pool = mp.Pool(Config.PROCESS_NUM)
+
+    allModelDicts = __calculateConfAfterSiftModel()
     csvReader = gpsUtil.CSVReader()
     results = csvReader.getDetectionResultfromCsv(os.path.join(Config.DETECTION_RECEIVE_PATH, fileName))
     results.sort(key=lambda ele: ele[0])
-    gpsResults = []
+    treeSet = treeUtil.UniqueTreeSets()
+    __calculateSiftFutureOfBNDBoxes(results)
     for resPerImage in results:
-        # [num,box1,box2..]
+        # [num,box1,box2..] 疫木结果box
         imageNum = resPerImage[0]
-
         model_dict = redis.getDict(imageNum)
-        # 如果程序还没算出该图片的模型参数，则重复获取
-        while not model_dict:
-            print("-----model ", imageNum, " is empty, maybe it's not calculated, retrying...")
-            model_dict = redis.getDict(imageNum)
-            time.sleep(Config.REDIS_REGET_DELAY)
+        # # 如果没该图片的模型参数，则报错
+        # if not model_dict:
+        #     raise RuntimeError("-----model ", imageNum,
+        #                        " is empty, maybe its image file is not exists, please check manually")
 
-        for resPerBox in resPerImage[1:]:
+        for index, resPerBox in enumerate(resPerImage[1:]):
+            # 每个疫木框
             [w1, h1, w2, h2, lon, lat] = resPerBox
-            # todo:去除重复点
+            # 去除重复点
             image = Image.open(os.path.join(Config.DATA_PATH, __getImageNameFromNum(imageNum)))
             model = SiftImageOperator.gen_from_dict(image, image, model_dict)
-            # point = [(w1 + w2) / 2, (h1 + h2) / 2]
-            # gpsRes = model.getGPS(point[0], point[1], model_dict[b"image_pos"])
-            # print("-----model ", imageNum, " calculated gps:", gpsRes)
-            # gpsResults.append(gpsRes.copy())
-            # 获取两个对角点的gps
-            left_top = model.getGPS(w1, h1, model_dict[b"image_pos"])
-            right_buttom = model.getGPS(w2, h2, model_dict[b"image_pos"])
-            # 找到距离最近的几个目标，然后判断是否有交融，无则认为是一颗新的疫木
-            gpsRes = [(left_top[0] + right_buttom[0]) / 2, (left_top[1] + right_buttom[1]) / 2]
-            gpsRes.extend(left_top)
-            gpsRes.extend(right_buttom)
-            is_new_flag = True
-            for tree in gpsResults:
-                distance = abs(tree[0] + tree[1] - gpsRes[0] - gpsRes[1])
-                if distance < Config.TOO_CLOSE_DISTANCE / 1e5:
-                    # 求相交面积
-                    ws = [left_top[0], right_buttom[0], tree[2], tree[4]]
-                    hs = [left_top[1], right_buttom[1], tree[3], tree[5]]
-                    w = 0
-                    if ws[0] < ws[2] < ws[1]:
-                        if ws[0] < ws[3] < ws[1]:
-                            w = abs(ws[3] - ws[2])
-                        else:
-                            w = min(abs(ws[3] - ws[0]), abs(ws[3] - ws[1]))
-                    elif ws[0] < ws[3] < ws[1]:
-                        w = min(abs(ws[2] - ws[0]), abs(ws[2] - ws[1]))
-                    h = 0
-                    if hs[0] < hs[2] < hs[1]:
-                        if hs[0] < hs[3] < hs[1]:
-                            h = abs(hs[3] - hs[2])
-                        else:
-                            h = min(abs(hs[3] - hs[0]), abs(hs[3] - hs[1]))
-                    elif hs[0] < hs[3] < hs[1]:
-                        h = min(abs(hs[2] - hs[0]), abs(hs[2] - hs[1]))
-                    area = h * w
-                    # 判断是否大量重合
-                    if area > Config.COMMON_AREA_LIMIT / 100 * abs(left_top[0] - right_buttom[0]) * abs(
-                            left_top[1] - right_buttom[1]):
-                        is_new_flag = False
-                        break
-            if is_new_flag:
-                gpsResults.append(gpsRes.copy())
+            cvimage = cv2.imread(os.path.join(Config.DATA_PATH, __getImageNameFromNum(imageNum)))
+            treeImage = cvimage[int(h1): int(h2), int(w1): int(w2)]
+            treeFeature = treeUtil.loadImageFuture(imageNum, index)
+            treeCenter = [(w1 + w2) / 2, (h1 + h2) / 2]
+            gpsRes = model.getGPS(treeCenter[0], treeCenter[1], model_dict[b"image_pos"])
+            addedFlag = False
+            for tree in treeSet.getNearbyTreesByGPS(gpsRes[0], gpsRes[1]):
+                if Config.COMMON_SHOW_WINDOW:
+                    future = cv2.cvtColor(treeImage, cv2.COLOR_BGR2HSV)
+                    future = future[:, :, 0]
+                    future = np.array(future, dtype=np.uint8)
+                    a = treeSet.checkIfSame(tree, treeFeature)
+                    cv2.destroyAllWindows()
+                    cv2.imshow('same1:' + str(a), tree.image)
+                    cv2.imshow('same2:' + str(a), treeImage)
+                    cv2.imshow('future:' + str(a), future)
+                    cv2.resizeWindow('same1:' + str(a), 300, 300)
+                    cv2.resizeWindow('same2:' + str(a), 300, 300)
+                    cv2.resizeWindow('future:' + str(a), 300, 300)
+                    cv2.moveWindow('same1:' + str(a), 0, 0)
+                    cv2.moveWindow('same2:' + str(a), 400, 0)
+                    cv2.moveWindow('future:' + str(a), 800, 0)
+                    print('?????test :similarity:', str(a), 'futureNum:', len(tree.future), ' ', len(treeFeature))
 
-    endAnalyzeImages()
+                    cv2.waitKey(2000)
+                if treeSet.checkIfSame(tree, treeFeature) > Config.COMMON_LIMIT:
+                    treeSet.addTree(tree, treeFeature, gpsRes, float(model_dict[b'confidence']))
+                    addedFlag = True
+                    break
+            if not addedFlag:
+                treeSet.addUniqueTree(treeImage, treeFeature, gpsRes, float(model_dict[b'confidence']))
+
+    gpsResults = treeSet.saveUniqueTrees()
+
+    try:
+        endAnalyzeImages()
+    except RuntimeWarning:
+        pass
     # 保存gps列表
     con = __saveGPSResult(Config.ALL_GPS_RESULT_PATH, gpsResults)
     finalResults = gpsResults
@@ -157,7 +179,7 @@ def getGPSfromCSV(fileName):
     #         finalResults.append(v1)
     #
     # con = __saveGPSResult(Config.FINAL_GPS_RESULT_PATH, finalResults)
-    print("***** model calculated ", len(gpsResults), " gps points, ", len(finalResults), " points are unique")
+    print("***** model calculated ", treeSet.treeImageNum, " trees, ", treeSet.uniqueTreeNum, " trees are unique")
 
     return con
 
@@ -197,8 +219,83 @@ def unique(all_points_file):
 
 
 ######################################################################
-#                          下面是私有方法                               #
+#                            下面是私有方法                             #
 ######################################################################
+def __calculateSiftFutureOfBNDBoxes(results):
+    global pool
+    for resPerImage in results:
+        # [num,box1,box2..] 疫木结果box
+        imageNum = resPerImage[0]
+
+        for index, resPerBox in enumerate(resPerImage[1:]):
+            pool.apply_async(__calculateSiftFutureOfBox, (resPerBox, imageNum, index,))
+    pool.close()
+    pool.join()
+
+
+def __calculateSiftFutureOfBox(box, imgId, boxId):
+    # 每个疫木框
+    [w1, h1, w2, h2, lon, lat] = box
+    # 去除重复点
+    cvimage = cv2.imread(os.path.join(Config.DATA_PATH, __getImageNameFromNum(imgId)))
+    treeImage = cvimage[int(h1): int(h2), int(w1): int(w2)]
+    treeFeature = treeUtil.convertImageToFutureImg(treeImage)
+    np.save('tempData/illTreeFeatures/' + str(imgId) + '.' + str(boxId) + '.npy', treeFeature)
+
+
+def __calculateConfAfterSiftModel():
+    # 计算置信度
+    # 拿到所有的图片序号
+    imageNumNameMap = {}
+    for image in os.listdir(Config.DATA_PATH):
+        if image.endswith('TIF') or image.endswith('tif') or image.endswith('JPG') or image.endswith(
+                'jpg') or image.endswith('PNG') or image.endswith('png'):
+            imageNumNameMap[__getImageNumFromName(image)] = os.path.join(Config.DATA_PATH, image)
+    imgs = sorted(imageNumNameMap.keys())
+    # 拿到所有的像素gps转换模型 和 需要着重处理的模型参数
+    allModelParams = []
+    allModelDicts = []
+    for index, i in enumerate(imgs):
+        dict = redis.getDict(i)
+        # 如果没该图片的模型参数，则报错
+        if not dict:
+            raise RuntimeError("-----model ", i, " is empty, maybe its image file is not exists, please check manually")
+        allModelDicts.append(dict)
+        if index % 2 == 0:
+            allModelParams.append([float(dict[b'piex_k']), float(dict[b'piex_cosa']), float(dict[b'piex_sina'])])
+
+    # 计算置信度
+    def calculateConfBetweenParams(param1, param2):
+        # piex_k带来的置信度
+        conf_k = min(abs(param1[0] - param2[0]) / (param1[0] + param2[0]) * 2, 1)
+        # piex_a带来的置信度
+        angle_1 = np.angle(param1[1] + 1j * param1[2])
+        angle_2 = np.angle(param2[1] + 1j * param2[2])
+        conf_angle = min(abs(angle_1 - angle_2) / (abs(angle_1) + abs(angle_2)) * 2, 1)
+
+        return 1 - Config.GPS_EVALUATE_K_WEIGHT * conf_k - Config.GPS_EVALUATE_A_WEIGHT * conf_angle
+
+    for i in range(int(np.round(len(allModelDicts) / 2))):
+        # 根据前面的计算置信度
+        conf = 0.25
+        if i != 0:
+            conf = 0.5 * calculateConfBetweenParams(allModelParams[i], allModelParams[i - 1])
+        # 根据后面的计算置信度
+        if i != int(np.round(len(allModelDicts) / 2)) - 1:
+            conf += 0.5 * calculateConfBetweenParams(allModelParams[i], allModelParams[i + 1])
+        else:
+            conf += 0.25
+        # 保证conf非0
+        conf = max(1e-5, conf)
+        allModelDicts[i * 2][b'confidence'] = conf
+        if i * 2 + 1 < len(allModelDicts):
+            allModelDicts[i * 2 + 1][b'confidence'] = conf
+    # 存回redis中
+    for i, dict in enumerate(allModelDicts):
+        redis.setDict(imgs[i], dict)
+    return allModelDicts
+
+
 def __calcalateDistancefromGPS(gps1, gps2):
     return (((gps1[0] - gps2[0]) * 111000) ** 2 + ((gps1[1] - gps2[1]) * 111000 * 2 / 3) ** 2) ** 0.5
 
@@ -238,22 +335,25 @@ def __getImageNameFromNum(num):
     return Config.DATA_PRENAME + str(num) + Config.DATA_AFTNAME
 
 
-def __analyzeImagePair(mainImageURL, subImageURL, csvReader):
+# (imageNumNameMap,pair[0], pair[1], csvReader, True, None,imgLocks[i],imgLocks[1])
+def __analyzeImagePair(imageNumNameMap, mainImageId, subImageId, csvReader, index):
     """
     成对处理图片，获取其gps映射函数并存入redis
     :param mainImageURL:
     :param subImageURL:
     :return:
     """
+    mainImageURL = imageNumNameMap[mainImageId]
+    subImageURL = imageNumNameMap[subImageId]
     mainImage = Image.open(mainImageURL)
     subImage = Image.open(subImageURL)
     mainGps = gpsUtil.getGPSfromFile(mainImageURL)
     subGps = gpsUtil.getGPSfromFile(subImageURL)
     if mainGps is None or subGps is None:
-        mainGps = csvReader.getImageGPSfromCsv(Config.DATA_PATH, mainImageURL.split('_')[0].split('\\')[-1],
+        mainGps = csvReader.getImageGPSfromCsv(Config.DATA_PATH, os.path.basename(mainImageURL).split('_')[0],
                                                Config.CSV_IMAGE_GPS_READ_PARAMS[0], Config.CSV_IMAGE_GPS_READ_PARAMS[1],
                                                Config.CSV_IMAGE_GPS_READ_PARAMS[2], Config.CSV_IMAGE_GPS_READ_PARAMS[3])
-        subGps = csvReader.getImageGPSfromCsv(Config.DATA_PATH, subImageURL.split('_')[0].split('\\')[-1],
+        subGps = csvReader.getImageGPSfromCsv(Config.DATA_PATH, os.path.basename(subImageURL).split('_')[0],
                                               Config.CSV_IMAGE_GPS_READ_PARAMS[0], Config.CSV_IMAGE_GPS_READ_PARAMS[1],
                                               Config.CSV_IMAGE_GPS_READ_PARAMS[2], Config.CSV_IMAGE_GPS_READ_PARAMS[3])
     model = SiftImageOperator(mainImage, subImage, mainGps, subGps, False, nfeatures=Config.SIFT_N_FEATURES)
@@ -262,8 +362,58 @@ def __analyzeImagePair(mainImageURL, subImageURL, csvReader):
     dictr = model.to_dict()
     dictl["image_pos"] = 'l'
     dictr["image_pos"] = 'r'
-    redis.setDict(__getImageNumFromName(mainImageURL.split('\\')[-1]), dictl)
-    redis.setDict(__getImageNumFromName(subImageURL.split('\\')[-1]), dictr)
-    print("***** sift: a task is succeed")
+    redis.setDict(mainImageId, dictl)
+    if subImageId > mainImageId:
+        redis.setDict(subImageId, dictr)
+    print("***** sift: a task is succeed,left:", mainImageId, 'right:', subImageId)
 
-# unique("Sun May 22 16-18-42 2022.csv")
+
+def __score_gps_result():
+    pass
+
+
+def __saveIllnessTree(image, w1, h1, w2, h2, gpsRes):
+    cv2.imwrite(os.path.join(Config.ILL_TREES_IMAGE_PATH, str(gpsRes[0]) + str(gpsRes[1]) + '.jpg'),
+                image[h1:h2, w1:w2])
+
+######################################################################
+#                          下面是被封印的代码                            #
+######################################################################
+# if __name__ == '__main__':
+#     imageNumNameMap = {}
+#     imagePairs = []
+#     for image in os.listdir(Config.DATA_PATH):
+#         if image.endswith('TIF') or image.endswith('tif') or image.endswith('JPG') or image.endswith(
+#                 'jpg') or image.endswith('PNG') or image.endswith('png'):
+#             imageNumNameMap[__getImageNumFromName(image)] = os.path.join(Config.DATA_PATH, image)
+#     # 按照数字大小排序图片文件，而不是字典序，随后生成图片对
+#     imgs = sorted(imageNumNameMap.keys())
+#     imagePair = []
+#     for key in imgs:
+#         if len(imagePair) == 0:
+#             imagePair.append(key)
+#         else:
+#             imagePair.append(key)
+#             imagePairs.append(imagePair.copy())
+#             imagePair = []
+#     if len(imagePair) == 1:
+#         imagePair.append(imageNumNameMap[imgs[-2]])
+#         imagePairs.append(imagePair.copy())
+#
+#     # 处理图片
+#     pool = mp.Pool(Config.PROCESS_NUM)
+#     csvReader = gpsUtil.CSVReader()
+#     csvReader.readCSV(Config.DATA_PATH)
+#     imgLocks = []
+#     for i in range(len(imagePairs)):
+#         imgLocks.append(mp.Lock())
+#     for i, pair in enumerate(imagePairs):
+#         if i == 0:
+#             __analyzeImagePair(imageNumNameMap, pair[0], pair[1], csvReader,i)
+#         elif i == len(imagePairs) - 1:
+#             __analyzeImagePair(imageNumNameMap, pair[0], pair[1], csvReader,-1)
+#         else:
+#             __analyzeImagePair(
+#                 imageNumNameMap, pair[0], pair[1], csvReader,i)
+#
+#     pool.close()

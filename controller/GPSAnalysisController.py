@@ -3,8 +3,7 @@
 # @Description : GPS分析Controller
 from flask import Blueprint, request
 
-import Config
-import Utils.RedisUtil as redis
+from datas import Config
 from service import GPSAnalysisService as gpsAnalysisService
 from vo import R
 import enums.ResultCode as resCode
@@ -59,10 +58,13 @@ def endImageAnalysis():
 def submitDetection():
     file = request.files.get("result")
     if file is None:
-        return R.fail(resCode.REQUEST_PARAMS_ILLEGAL, "检测结果文件未传输")
+        return R.fail(resCode.REQUEST_PARAMS_ILLEGAL, "识别结果文件未传输")
         # 直接使用文件上传对象保存
     fileName = str(time.asctime(time.localtime(time.time())))
     fileName = fileName.replace(':', '-') + '.csv'
     file.save(os.path.join(Config.DETECTION_RECEIVE_PATH, fileName))
-    res=gpsAnalysisService.getGPSfromCSV(fileName)
+    try:
+        res=gpsAnalysisService.getGPSfromCSV(fileName)
+    except RuntimeWarning:
+        return R.fail(msg='请先分析图片，再上传识别结果文件')
     return R.success(data=res)
