@@ -8,8 +8,6 @@ import exifread
 import math
 import fractions
 import os
-import matplotlib.pyplot as plt
-from functools import partial
 
 GPSCsv = None
 
@@ -118,7 +116,7 @@ class SiftImageOperator:
         matches_1 = flann.knnMatch(describesLeft, describesRight, k=2)  # 进行匹配搜索，参数k为返回的匹配点对数量
         # 把保留的匹配点放入good列表
         good1 = []
-        T = 0.5  # 阈值
+        T = 0.7  # 阈值
         # 筛选特征点
         for i, (m, n) in enumerate(matches_1):
             if m.distance < T * n.distance:  # 如果最近邻点的距离和次近邻点的距离比值小于阈值，则保留最近邻点
@@ -339,6 +337,7 @@ class SiftImageOperator:
 
         #  将右图旋转到和左图同一朝向
         self.right_img_k = self.right_img_sina = self.right_img_cosa = 0
+        ignore = 0
         for t in range(50):
             x1 = np.random.randint(0, len(dst_w))
             x2 = 0
@@ -346,10 +345,15 @@ class SiftImageOperator:
                 x2 = np.random.randint(1, len(dst_w))
             rightVac = [dst_w[x1] - dst_w[x2], dst_h[x1] - dst_h[x2]]
             leftVac = [src_w[x1] - src_w[x2], src_h[x1] - src_h[x2]]
+            if (sum(rightVac) == 0):
+                print("error occured:sum of img piex distance=0")
+                ignore += 1
+                continue
             k, sina, cosa = self.__calculate_angle_k_of_vactor(leftVac, rightVac)
-            self.right_img_k += 0.02 * k
-            self.right_img_sina += 0.02 * sina
-            self.right_img_cosa += 0.02 * cosa
+            self.right_img_k += 0.02 * k * (1 + ignore)
+            self.right_img_sina += 0.02 * sina * (1 + ignore)
+            self.right_img_cosa += 0.02 * cosa * (1 + ignore)
+            ignore = 0
 
         # height, width = self.__imgRight.shape[:2]
         # H = cv2.getRotationMatrix2D((width/2, height/2), np.arccos(self.right_img_cosa)*180/np.pi, 1)
@@ -411,8 +415,7 @@ class SiftImageOperator:
     # 进行坐标转换
     def getGPS(self, w, h, img_sig='l'):
         if img_sig == b'r':
-            [w, h] = self.__rotate_vac_to_angle([w, h], self.right_img_sina, self.right_img_cosa,
-                                                self.right_img_k)
+            [w, h] = self.__rotate_vac_to_angle([w, h], self.right_img_sina, self.right_img_cosa, self.right_img_k)
             w = w - self.piex_w
             h = h - self.piex_h
         w = w - np.polyval(self.coef_w, w) + self.piex_w
@@ -420,7 +423,7 @@ class SiftImageOperator:
         piex_coord = [w - self.leftMedia[0],
                       h - self.leftMedia[1]]
         gps_coord = self.__rotate_vac_to_angle(piex_coord, self.piex_sina, self.piex_cosa, self.piex_k)
-        gps_coord = [gps_coord[0] / self.zoom + self.leftGPS[0], gps_coord[1] / self.zoom + self.leftGPS[1]]
+        gps_coord = [-gps_coord[0] / self.zoom + self.leftGPS[0], -gps_coord[1] / self.zoom + self.leftGPS[1]]
 
         return gps_coord
 

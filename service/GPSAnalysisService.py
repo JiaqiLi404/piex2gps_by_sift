@@ -38,10 +38,13 @@ def startAnalyzeImages():
 
     imageNumNameMap = {}
     imagePairs = []
-    for image in os.listdir(Config.DATA_PATH):
-        if image.endswith('TIF') or image.endswith('tif') or image.endswith('JPG') or image.endswith(
-                'jpg') or image.endswith('PNG') or image.endswith('png'):
-            imageNumNameMap[__getImageNumFromName(image)] = os.path.join(Config.DATA_PATH, image)
+    try:
+        for image in os.listdir(Config.DATA_PATH):
+            if image.endswith('TIF') or image.endswith('tif') or image.endswith('JPG') or image.endswith(
+                    'jpg') or image.endswith('PNG') or image.endswith('png'):
+                imageNumNameMap[__getImageNumFromName(image)] = os.path.join(Config.DATA_PATH, image)
+    except:
+        print("读取错误")
     # 按照数字大小排序图片文件，而不是字典序，随后生成图片对
     imgs = sorted(imageNumNameMap.keys())
     imagePair = []
@@ -66,10 +69,11 @@ def startAnalyzeImages():
     csvReader = gpsUtil.CSVReader()
     csvReader.readCSV(Config.DATA_PATH)
 
+    __analyzeImagePair(imageNumNameMap, imagePairs[0][0], imagePairs[0][1], csvReader, 0)
     for i, pair in enumerate(imagePairs):
         if i == 0:
             pool.apply_async(__analyzeImagePair,
-                             (imageNumNameMap, pair[0], pair[1], csvReader, 0,))
+                             (imageNumNameMap, pair[0], pair[1], csvReader, 0))
         elif i == len(imagePairs) - 1:
             pool.apply_async(__analyzeImagePair,
                              (imageNumNameMap, pair[0], pair[1], csvReader, -1,))
@@ -154,7 +158,7 @@ def getGPSfromCSV(fileName):
                     treeSet.addTree(tree, treeFeature, gpsRes, float(model_dict[b'confidence']))
                     addedFlag = True
                     break
-            if not addedFlag:
+            if not addedFlag and float(model_dict[b'confidence'])>0.1:
                 treeSet.addUniqueTree(treeImage, treeFeature, gpsRes, float(model_dict[b'confidence']))
 
     gpsResults = treeSet.saveUniqueTrees()
@@ -350,14 +354,21 @@ def __analyzeImagePair(imageNumNameMap, mainImageId, subImageId, csvReader, inde
     mainGps = gpsUtil.getGPSfromFile(mainImageURL)
     subGps = gpsUtil.getGPSfromFile(subImageURL)
     if mainGps is None or subGps is None:
-        mainGps = csvReader.getImageGPSfromCsv(Config.DATA_PATH, os.path.basename(mainImageURL).split('_')[0],
-                                               Config.CSV_IMAGE_GPS_READ_PARAMS[0], Config.CSV_IMAGE_GPS_READ_PARAMS[1],
-                                               Config.CSV_IMAGE_GPS_READ_PARAMS[2], Config.CSV_IMAGE_GPS_READ_PARAMS[3])
-        subGps = csvReader.getImageGPSfromCsv(Config.DATA_PATH, os.path.basename(subImageURL).split('_')[0],
-                                              Config.CSV_IMAGE_GPS_READ_PARAMS[0], Config.CSV_IMAGE_GPS_READ_PARAMS[1],
-                                              Config.CSV_IMAGE_GPS_READ_PARAMS[2], Config.CSV_IMAGE_GPS_READ_PARAMS[3])
+        mainGps = csvReader.getImageGPSfromCsv(Config.DATA_PATH, str(mainImageId),
+                                               Config.CSV_IMAGE_GPS_READ_PARAMS[0],
+                                               Config.CSV_IMAGE_GPS_READ_PARAMS[1],
+                                               Config.CSV_IMAGE_GPS_READ_PARAMS[2],
+                                               Config.CSV_IMAGE_GPS_READ_PARAMS[3])
+        subGps = csvReader.getImageGPSfromCsv(Config.DATA_PATH, str(subImageId),
+                                              Config.CSV_IMAGE_GPS_READ_PARAMS[0],
+                                              Config.CSV_IMAGE_GPS_READ_PARAMS[1],
+                                              Config.CSV_IMAGE_GPS_READ_PARAMS[2],
+                                              Config.CSV_IMAGE_GPS_READ_PARAMS[3])
+    # try:
     model = SiftImageOperator(mainImage, subImage, mainGps, subGps, False, nfeatures=Config.SIFT_N_FEATURES)
     model.computeImages()
+    # except:
+    #     print("模型计算错误")
     dictl = model.to_dict()
     dictr = model.to_dict()
     dictl["image_pos"] = 'l'

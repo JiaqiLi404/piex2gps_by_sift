@@ -48,10 +48,11 @@ class CSVReader:
         lon = None
         lat = None
         for row in self.GPSCsv:
-            if row[file_number_column] == str(file_number):
+            if int(row[file_number_column]) == int(file_number):
                 lon = float(row[lon_column]) / zoom
                 lat = float(row[lat_column]) / zoom
                 print("-----csv: loaded image ", file_number, " gps from csv:", lon, ',', lat)
+                break
         if lon is None or lat is None:
             print("!!!!!Image doesn't have GPS attributes!!!!!",str(file_number),self.GPSCsv)
             raise RuntimeError("!!!!!Image doesn't have GPS attributes!!!!!")

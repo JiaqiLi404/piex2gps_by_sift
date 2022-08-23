@@ -21,9 +21,8 @@ ILL_TREES_IMAGE_PATH = 'datas/illnesstreeImages'  # 疫木图像存放
 """
 图片文件设置
 """
-DATA_PRENAME = 'recut'  # 图片文件的前缀 图片文件名：<前缀>编号<后缀>
-DATA_AFTNAME = '.png'  # 图片文件的前缀 图片文件名：<前缀>编号<后缀>
-# DATA_AFTNAME = '_RGB.tif'
+DATA_PRENAME = 'DSC0'  # 图片文件的前缀 图片文件名：<前缀>编号<后缀>
+DATA_AFTNAME = '.JPG'  # 图片文件的前缀 图片文件名：<前缀>编号<后缀>
 
 """
 Redis设置
@@ -42,8 +41,7 @@ PROCESS_NUM = 6  # 进程数,注意此外还需运行主线程
 CSV文件读取设置
 """
 # 图像gps的读取，使用exif的话无需修改
-# CSV_IMAGE_GPS_READ_PARAMS = [0, 2, 1, 1]  # 【文件名所在列，经度所在列，纬度所在列，缩放比例】
-CSV_IMAGE_GPS_READ_PARAMS = [0, 2, 1, 1]  # 【文件名所在列，经度所在列，纬度所在列，缩放比例】
+CSV_IMAGE_GPS_READ_PARAMS = [0, 2,3, 1]  # 【文件名所在列，经度所在列，纬度所在列，缩放比例】
 
 """
 SIFT算法设置
