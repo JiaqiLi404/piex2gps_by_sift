@@ -11,7 +11,6 @@ from PIL import Image
 from datas import Config
 import os
 import multiprocessing as mp
-import Utils.GPSUtil as gpsUtil
 import Utils.RedisUtil as redis
 import numpy as np
 import matplotlib.pyplot as plt
@@ -63,7 +62,7 @@ def startAnalyzeImages():
 
     # 多进程处理图片
     pool = mp.Pool(Config.PROCESS_NUM)
-    csvReader = gpsUtil.CSVReader()
+    csvReader = GPSUtil.CSVReader()
     csvReader.readCSV(Config.DATA_PATH)
     imgLocks = []
     for i in range(len(imagePairs)):
@@ -103,7 +102,7 @@ def getGPSfromCSV(fileName):
     :param fileName:
     :return:
     """
-    csvReader = gpsUtil.CSVReader()
+    csvReader = GPSUtil.CSVReader()
     results = csvReader.getDetectionResultfromCsv(os.path.join(Config.DETECTION_RECEIVE_PATH, fileName))
     results.sort(key=lambda ele: ele[0])
     gpsResults = None
@@ -273,8 +272,8 @@ def __analyzeImagePair(imageNumNameMap,mainImageId, subImageId, csvReader,):
     subImageURL = imageNumNameMap[subImageId]
     mainImage = Image.open(mainImageURL)
     subImage = Image.open(subImageURL)
-    mainGps = gpsUtil.getGPSfromFile(mainImageURL)
-    subGps = gpsUtil.getGPSfromFile(subImageURL)
+    mainGps = GPSUtil.getGPSfromFile(mainImageURL)
+    subGps = GPSUtil.getGPSfromFile(subImageURL)
     if mainGps is None or subGps is None:
         mainGps = csvReader.getImageGPSfromCsv(Config.DATA_PATH, mainImageURL.split('_')[0].split('\\')[-1],
                                                Config.CSV_IMAGE_GPS_READ_PARAMS[0], Config.CSV_IMAGE_GPS_READ_PARAMS[1],
@@ -378,7 +377,7 @@ if __name__ == '__main__':
 
     # 处理图片
     pool = mp.Pool(Config.PROCESS_NUM)
-    csvReader = gpsUtil.CSVReader()
+    csvReader = GPSUtil.CSVReader()
     csvReader.readCSV(Config.DATA_PATH)
     imgLocks = []
     for i in range(len(imagePairs)):
